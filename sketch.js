@@ -28,7 +28,7 @@ let PALETTE = ['#E2D248','#57A8A3','#DE9D45','#342372','#264C92',
                '#509EDE','#D53075','#D13531','#B2644E','#D36292'];
 
 let src, amp, fft, peak;
-let started = false, energy = 0, surge = 0, avgE = 0, showMeter = false;
+let started = false, energy = 0, surge = 0, avgE = 0, bloom = 0, showMeter = false;
 let epoch = 0;
 let REST = [], LIVE = [];
 let conductor = { movement: 'descent' };
@@ -79,7 +79,7 @@ const MOVEMENTS = {
       dx: cell.dx + cos(ang) * mag,
       dy: cell.dy + sin(ang) * mag * 0.7 + m * rowT * CELL * 0.35 * ctx.intensity,
       omega: (noise(c * 0.25 + 9, r * 0.25, T * 0.2) - 0.5) * m * 0.45 * ctx.intensity,
-      pColour: constrain(m * ctx.col, 0, 1),
+      pColour: constrain(m * (0.35 + ctx.col), 0, 1),   // multi-colour blooms in the chaos
     };
   },
 
@@ -88,14 +88,20 @@ const MOVEMENTS = {
     let rowT = r / (ROWS - 1);
     let m = ss(constrain(ctx.surge * (0.5 + rowT * ctx.reach * 0.7), 0, 1));
     let phase = c * 0.4 + r * 0.5 - ctx.clock * 1.1;
-    return { dx: cell.dx, dy: cell.dy, omega: sin(phase) * m * 0.22 * ctx.intensity, pColour: constrain(m * ctx.col * 0.8, 0, 1) };
+    return { dx: cell.dx, dy: cell.dy, omega: sin(phase) * m * 0.22 * ctx.intensity, pColour: constrain(m * (0.3 + ctx.col) * 0.8, 0, 1) };
   },
+
+  // ── RESOLUTION / MOTIF — order emerges from disorder; multi-colour with white space ──
+  orderSnap(){ return { dx: 0, dy: 0, omega: 0, pColour: 0 }; },                    // clean grid re-forms
+  checker(cell, c, r){ return { dx: 0, dy: 0, omega: 0, pColour: 0, motif: { on: (c + r) % 2 === 0, hue: cell.hue } }; },
+  stripes(cell, c, r){ return { dx: 0, dy: 0, omega: 0, pColour: 0, motif: { on: c % 3 === 0, hue: (cell.hue + c) % PALETTE.length } }; },
 
   settle(cell){ return { dx: cell.dx, dy: cell.dy, omega: 0, pColour: 0 }; },
 };
 
-// two textures, alternating slowly — variety without spectacle
-const SEQ = ['descent', 'descent', 'spinWave', 'descent'];
+// the score: disorder punctuated by motif/order resolutions — the flashes of magic
+const SEQ = ['descent','descent','checker','descent','spinWave','orderSnap',
+             'descent','stripes','descent','spinWave','orderSnap','descent'];
 function pickMovement(clock){ return SEQ[floor(clock / PHRASE) % SEQ.length]; }
 
 // ═══════════════════════════════════════════════════════════
@@ -192,7 +198,9 @@ function draw(){
   avgE = lerp(avgE, energy, 0.02);
   if (started && beatNow && energy > tSens && energy > avgE * 1.7 && surge < 0.35){
     surge = constrain((energy - avgE) * 2.2, 0.5, 1);
+    bloom = 1;                                                 // a burst of multi-colour on the moment
   }
+  bloom *= 0.9;
   let idle = 0.10 + 0.07 * sin(frameCount * 0.009);            // gentle autonomous life — always playable
   let floorSurge = constrain((energy - 0.72) * 1.4, 0, 0.4);   // genuine swells sustain motion
   surge = max(surge * 0.955, max(floorSurge, idle));
@@ -204,9 +212,6 @@ function draw(){
   conductor.movement = pickMovement(clock);
   let move = MOVEMENTS[conductor.movement] || MOVEMENTS.settle;
   let restore = 0.045 * (1 - constrain(surge, 0, 1)) + 0.01;   // spring reforms Schotter as surge fades
-
-  // one evolving accent colour, used sparingly
-  let dom = PALETTE[floor((clock + 3) / (PHRASE * 2)) % PALETTE.length];
 
   robotMix = lerp(robotMix, robotMode ? 1 : 0, 0.06);
   if (robotMix > 0.01) walkPhase += 0.05 + energy * 0.13;
@@ -239,10 +244,15 @@ function draw(){
 
       let px = x + L.dx * gb + bx, py = y + L.dy * gb + by, prot = L.rot * gb + bRot;
 
-      // ── colour: a sparse single accent, tied to how far this square has broken ──
-      let filled = false, fc = dom;
-      randomSeed(i * 9176 + epoch * 131 + 7);
-      if (random() < L.col) filled = true;
+      // ── colour: MULTI-colour with white space; motifs draw a deterministic pattern;
+      //    a bloom ignites more squares on the musical moment ──
+      let filled = false, fc;
+      if (tgt.motif){
+        if (tgt.motif.on){ filled = true; fc = PALETTE[tgt.motif.hue]; }
+      } else {
+        randomSeed(i * 9176 + epoch * 131 + 7);
+        if (random() < L.col + bloom * 0.45){ filled = true; fc = PALETTE[(cell.hue + floor(random(3))) % PALETTE.length]; }
+      }
 
       // ── robot overlay (easter egg) ──
       if (robotMix > 0.001){
