@@ -28,14 +28,14 @@ let PALETTE = ['#E2D248','#57A8A3','#DE9D45','#342372','#264C92',
                '#509EDE','#D53075','#D13531','#B2644E','#D36292'];
 
 let src, amp, fft, peak;
-let started = false, energy = 0, surge = 0, avgE = 0, showMeter = true;
+let started = false, energy = 0, surge = 0, avgE = 0, showMeter = false;
 let epoch = 0;
 let REST = [], LIVE = [];
 let conductor = { movement: 'descent' };
 
-// live tuning (press T) — dial the feel in real time, then bake the numbers in
-let sldCol, sldSens, sldInt, sldReach, tunePanel = false;
-function mkSlider(mn, mx, v, st, y){ let s = createSlider(mn, mx, v, st); s.position(16, y); s.style('width', '172px'); s.hide(); return s; }
+// the viewer shapes the piece — unlabeled, open-ended (GRAV: the spectator co-creates).
+// each handle is a little Nees square you drag; what it does is for you to discover.
+let CONTROLS = [], dragging = -1;
 
 function ss(x){ return x * x * (3 - 2 * x); }
 
@@ -134,11 +134,14 @@ function setup(){
   fi.position(18, 18);
   fi.attribute('accept', 'audio/*');
 
-  // hidden tuning sliders (press T): colour · sensitivity · intensity · reach
-  sldCol   = mkSlider(0,   1,   0.34, 0.01, 100);
-  sldSens  = mkSlider(0.2, 0.8, 0.45, 0.01, 128);
-  sldInt   = mkSlider(0,   2,   1.0,  0.05, 156);
-  sldReach = mkSlider(0.2, 2.5, 1.3,  0.05, 184);
+  // permanent, unlabeled controls — the viewer's instrument
+  let cx = width - MARGIN + 44, cw = MARGIN - 90;   // clean right-margin white space
+  CONTROLS = [
+    { x: cx, y: height/2 - 96, w: cw, val: 0.34 },
+    { x: cx, y: height/2 - 32, w: cw, val: 0.64 },
+    { x: cx, y: height/2 + 32, w: cw, val: 0.50 },
+    { x: cx, y: height/2 + 96, w: cw, val: 0.46 },
+  ];
 }
 
 function gotFile(file){
@@ -150,16 +153,26 @@ function gotFile(file){
     });
   }
 }
-function mousePressed(){ /* audio only starts on upload */ }
+function mousePressed(){
+  for (let i = 0; i < CONTROLS.length; i++){
+    let ct = CONTROLS[i];
+    if (mouseX > ct.x - 10 && mouseX < ct.x + ct.w + 10 && abs(mouseY - ct.y) < 12){
+      ct.val = constrain((mouseX - ct.x) / ct.w, 0, 1);
+      dragging = i; return;
+    }
+  }
+}
+function mouseDragged(){ if (dragging >= 0){ let ct = CONTROLS[dragging]; ct.val = constrain((mouseX - ct.x) / ct.w, 0, 1); } }
+function mouseReleased(){ dragging = -1; }
 
 function draw(){
   background(248);
 
   // live tuning values (defaults when sliders absent)
-  let tCol   = sldCol   ? sldCol.value()   : 0.34;
-  let tSens  = sldSens  ? sldSens.value()  : 0.45;
-  let tInt   = sldInt   ? sldInt.value()   : 1.0;
-  let tReach = sldReach ? sldReach.value() : 1.3;
+  let tCol   = CONTROLS[0] ? CONTROLS[0].val : 0.34;
+  let tSens  = CONTROLS[1] ? lerp(0.75, 0.25, CONTROLS[1].val) : 0.45;
+  let tInt   = CONTROLS[2] ? CONTROLS[2].val * 2 : 1.0;
+  let tReach = CONTROLS[3] ? lerp(0.3, 2.5, CONTROLS[3].val) : 1.3;
 
   // ── read the music ──
   let beatNow = false, treble = 0;
@@ -180,9 +193,10 @@ function draw(){
   if (started && beatNow && energy > tSens && energy > avgE * 1.7 && surge < 0.35){
     surge = constrain((energy - avgE) * 2.2, 0.5, 1);
   }
-  let floorSurge = constrain((energy - 0.72) * 1.4, 0, 0.4);   // only genuine swells sustain motion
-  surge = max(surge * 0.955, floorSurge);
-  if (!started){ surge = lerp(surge, 0, 0.1); avgE = 0; }
+  let idle = 0.10 + 0.07 * sin(frameCount * 0.009);            // gentle autonomous life — always playable
+  let floorSurge = constrain((energy - 0.72) * 1.4, 0, 0.4);   // genuine swells sustain motion
+  surge = max(surge * 0.955, max(floorSurge, idle));
+  if (!started) avgE = 0;
 
   let clock = (started && src && src.currentTime) ? src.currentTime() * 0.6 : 0;
   let ctx = { energy, surge, treble, beatNow, clock, epoch, col: tCol, reach: tReach, intensity: tInt };
@@ -260,13 +274,18 @@ function draw(){
     text('energy '+energy.toFixed(2)+'   surge '+surge.toFixed(2)+'   '+conductor.movement, 16, 52);
     fill(220); rect(16, 72, 180, 10); fill('#D53075'); rect(16, 72, 180*constrain(surge,0,1), 10);
   }
-  if (tunePanel){
-    noStroke(); rectMode(CORNER); fill(30); textAlign(LEFT, CENTER); textSize(12);
-    text('colour '+tCol.toFixed(2),      198, 106);
-    text('sensitivity '+tSens.toFixed(2),198, 134);
-    text('intensity '+tInt.toFixed(2),   198, 162);
-    text('reach '+tReach.toFixed(2),      198, 190);
-    textAlign(LEFT, TOP); fill(120); text('[T] hide · tell me these numbers when it feels right', 16, 206);
+  drawControls();
+}
+
+// unlabeled controls — thin line, a small square handle to drag. Part of the piece.
+function drawControls(){
+  rectMode(CENTER);
+  for (let ct of CONTROLS){
+    stroke(20); strokeWeight(1); noFill();
+    line(ct.x, ct.y, ct.x + ct.w, ct.y);
+    let hx = ct.x + ct.val * ct.w;
+    fill(248); stroke(20); strokeWeight(1.4);
+    push(); translate(hx, ct.y); rect(0, 0, 13, 13); pop();
   }
 }
 
@@ -275,5 +294,4 @@ function keyPressed(){
   if (key==='f'||key==='F') fullscreen(!fullscreen());
   if (key==='d'||key==='D') showMeter = !showMeter;
   if (key==='r'||key==='R') robotMode = !robotMode;
-  if (key==='t'||key==='T'){ tunePanel = !tunePanel; [sldCol, sldSens, sldInt, sldReach].forEach(s => tunePanel ? s.show() : s.hide()); }
 }
